@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model Operator {
+  id   Int     @id @default(autoincrement())
+  name String?
+}
+
+model Project {
+  id                 Int                  @id @default(autoincrement())
+  name               String?
+  isActive           Boolean              @default(true)
+  dictionaryProjects DictionaryProject[]
+  checklistProjects  ChecklistProject[]
+}
+
+enum DictionaryType {
+  All
+  OnlyOperator
+  OnlyClient
+  Hotwords
+}
+
+model Dictionary {
+  id                 Int                  @id @default(autoincrement())
+  name               String?
+  isActive           Boolean              @default(true)
+  type               DictionaryType
+  colorHex           String
+  phrases            Json
+  dictionaryProjects DictionaryProject[]
+}
+
+model DictionaryProject {
+  dictionaryId Int
+  projectId    Int
+  dictionary   Dictionary @relation(fields: [dictionaryId], references: [id], onDelete: Cascade)
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([dictionaryId, projectId])
+}
+
+model Checklist {
+  id                Int                @id @default(autoincrement())
+  name              String?
+  isActive          Boolean            @default(true)
+  data              Json?
+  checklistProjects ChecklistProject[]
+}
+
+model ChecklistProject {
+  checklistId Int
+  projectId   Int
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([checklistId, projectId])
+}
