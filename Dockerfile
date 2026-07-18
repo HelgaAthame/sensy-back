@@ -17,7 +17,8 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 
-RUN apk add --no-cache openssl
+# ffmpeg даёт и ffmpeg, и ffprobe (нужен для извлечения метаданных аудио при загрузке звонка)
+RUN apk add --no-cache openssl ffmpeg
 
 # prisma/ts-node остаются в зависимостях: entrypoint сам накатывает миграции и сид при старте контейнера.
 # NODE_ENV=production выставляется ПОСЛЕ npm install — иначе npm сам пропускает devDependencies
