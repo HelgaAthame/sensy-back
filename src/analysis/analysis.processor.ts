@@ -4,9 +4,33 @@ import { Prisma } from '@prisma/client';
 import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { AudioService } from './audio.service';
-import { complementIntervals, intersectIntervals, mergeIntervals } from './intervals';
-import { KeywordSearchService } from './keyword-search.service';
+import { complementIntervals, intersectIntervals, mergeIntervals, sumDuration } from './intervals';
+import { KeywordMatch, KeywordSearchService } from './keyword-search.service';
 import { SttChunkResult, SttService } from './stt.service';
+import { TonalRegion, TonalService } from './tonal.service';
+
+/** По телефонийной конвенции: канал 0 — оператор, канал 1 — клиент (см. keyword-search.service.ts). */
+const OPERATOR_CHANNEL = 0;
+const CLIENT_CHANNEL = 1;
+
+function average(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function negativeLevel(regions: TonalRegion[]): number | null {
+  const totalDuration = regions.reduce((sum, region) => sum + (region.endTime - region.startTime), 0);
+  if (totalDuration === 0) return null;
+  const weighted = regions.reduce(
+    (sum, region) => sum + region.prob * (region.endTime - region.startTime),
+    0,
+  );
+  return weighted / totalDuration;
+}
+
+function negativeSpeechWeightedDuration(regions: TonalRegion[]): number {
+  return regions.reduce((sum, region) => sum + region.prob * (region.endTime - region.startTime), 0);
+}
 
 export const MEDIA_ANALYSIS_QUEUE = 'media-analysis';
 
@@ -15,7 +39,12 @@ export interface MediaAnalysisJobData {
 }
 
 @Injectable()
-@Processor(MEDIA_ANALYSIS_QUEUE)
+@Processor(MEDIA_ANALYSIS_QUEUE, {
+  // ONNX-инференс (Whisper + распознавание эмоций) синхронно блокирует event loop на минуты —
+  // стандартный lockDuration BullMQ (30с) не успевает продлеваться, и job считается "зависшим"
+  // и перезапускается повторно, хотя первый запуск ещё не закончился. Даём щедрый запас.
+  lockDuration: 20 * 60 * 1000,
+})
 export class AnalysisProcessor extends WorkerHost {
   private readonly logger = new Logger(AnalysisProcessor.name);
 
@@ -24,6 +53,7 @@ export class AnalysisProcessor extends WorkerHost {
     private readonly audio: AudioService,
     private readonly stt: SttService,
     private readonly keywordSearch: KeywordSearchService,
+    private readonly tonal: TonalService,
   ) {
     super();
   }
@@ -75,7 +105,8 @@ export class AnalysisProcessor extends WorkerHost {
             sttResult.chunks,
             activeDictionaries,
           );
-          return { channel, sttResult, keywordMatches };
+          const tonalRegions = await this.tonal.classifyChunks(audioData, channel, sttResult.chunks);
+          return { channel, sttResult, keywordMatches, tonalRegions };
         }),
       );
 
@@ -112,17 +143,65 @@ export class AnalysisProcessor extends WorkerHost {
 
       const sttChunks: SttChunkResult[] = channelResults.flatMap((result) => result.sttResult.chunks);
       const fullText = channelResults.map((result) => result.sttResult.text).join(' ');
-      const keywordsSearchResult = channelResults.flatMap((result) => result.keywordMatches);
+      const keywordsSearchResult: KeywordMatch[] = channelResults.flatMap((result) => result.keywordMatches);
+      const tonalRegions: TonalRegion[] = channelResults.flatMap((result) => result.tonalRegions);
       const maxSimultaneousSilenceDuration = simultaneousSilenceRegions.reduce(
         (max, region) => Math.max(max, region.endTime - region.startTime),
         0,
       );
 
+      const operatorTonal = tonalRegions.filter((region) => region.channel === OPERATOR_CHANNEL);
+      const clientTonal = tonalRegions.filter((region) => region.channel === CLIENT_CHANNEL);
+      const operatorSpeech = speechIntervalsByChannel[OPERATOR_CHANNEL] ?? [];
+      const clientSpeech = speechIntervalsByChannel[CLIENT_CHANNEL] ?? [];
+      const callDuration =
+        mediaFile.duration ?? Math.max(...speechIntervalsByChannel.flat().map((interval) => interval.end), 0);
+      const unionSpeech = mergeIntervals(speechIntervalsByChannel.flat());
+      const totalSpeechOverall = sumDuration(unionSpeech);
+      const simultaneousSpeechDurations = simultaneousSpeechRegions.map(
+        (region) => region.endTime - region.startTime,
+      );
+      const simultaneousSilenceDurations = simultaneousSilenceRegions.map(
+        (region) => region.endTime - region.startTime,
+      );
+      const negativeLevelOverall = negativeLevel(tonalRegions);
+
+      const keywordsSearchCounter: Record<string, number> = {};
+      for (const match of keywordsSearchResult) {
+        const key = match.categoryName ?? String(match.category);
+        keywordsSearchCounter[key] = (keywordsSearchCounter[key] ?? 0) + 1;
+      }
+
+      const summaryAnalyserResult = {
+        simultaneousSpeechCount: simultaneousSpeechRegions.length,
+        simultaneousSilenceCount: simultaneousSilenceRegions.length,
+        maxSimultaneousSpeechDuration: simultaneousSpeechDurations.length
+          ? Math.max(...simultaneousSpeechDurations)
+          : null,
+        maxSimultaneousSilenceDuration,
+        averageSimultaneousSpeechDuration: average(simultaneousSpeechDurations),
+        averageSimultaneousSilenceDuration: average(simultaneousSilenceDurations) ?? 0,
+        keywordsSearchCounter,
+        totalSpeechOverall,
+        totalNonSpeechOverall: Math.max(0, callDuration - totalSpeechOverall),
+        negativeLevelOverall: negativeLevelOverall ?? 0,
+        totalSpeechDurationOperator: sumDuration(operatorSpeech),
+        totalNonSpeechDurationOperator: Math.max(0, callDuration - sumDuration(operatorSpeech)),
+        negativeSpeechWeightedDurationOperator: negativeSpeechWeightedDuration(operatorTonal),
+        negativeLevelOperator: negativeLevel(operatorTonal),
+        totalSpeechDurationClient: sumDuration(clientSpeech),
+        totalNonSpeechDurationClient: Math.max(0, callDuration - sumDuration(clientSpeech)),
+        negativeSpeechWeightedDurationClient: negativeSpeechWeightedDuration(clientTonal),
+        negativeLevelClient: negativeLevel(clientTonal),
+      };
+
       const resultData = {
         stt: { text: fullText, chunks: sttChunks, regions: [] } as unknown as Prisma.InputJsonValue,
+        tonal: { regions: tonalRegions } as unknown as Prisma.InputJsonValue,
         simultaneousSpeech: { regions: simultaneousSpeechRegions } as unknown as Prisma.InputJsonValue,
         simultaneousSilence: { regions: simultaneousSilenceRegions } as unknown as Prisma.InputJsonValue,
         keywordsSearchResult: { regions: keywordsSearchResult } as unknown as Prisma.InputJsonValue,
+        summaryAnalyserResult: summaryAnalyserResult as unknown as Prisma.InputJsonValue,
       };
 
       await this.prisma.mediaFileResult.upsert({
@@ -138,6 +217,7 @@ export class AnalysisProcessor extends WorkerHost {
           keywordsCount: keywordsSearchResult.length,
           maxSimultaneousSilenceDuration,
           simultaneousSpeechCount: simultaneousSpeechRegions.length,
+          negativeLevelOverall,
         },
       });
 

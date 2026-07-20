@@ -24,7 +24,50 @@ interface ProbedMetadata {
 const mediaFileInclude = {
   operator: true,
   project: true,
+  result: { select: { summaryAnalyserResult: true } },
 } as const;
+
+interface SummaryAnalyserResult {
+  simultaneousSpeechCount: number | null;
+  simultaneousSilenceCount: number;
+  maxSimultaneousSpeechDuration: number | null;
+  maxSimultaneousSilenceDuration: number;
+  averageSimultaneousSpeechDuration: number | null;
+  averageSimultaneousSilenceDuration: number;
+  keywordsSearchCounter: Record<string, number>;
+  totalSpeechOverall: number;
+  totalNonSpeechOverall: number;
+  negativeLevelOverall: number;
+  totalSpeechDurationOperator: number | null;
+  totalNonSpeechDurationOperator: number | null;
+  negativeSpeechWeightedDurationOperator: number | null;
+  negativeLevelOperator: number | null;
+  totalSpeechDurationClient: number | null;
+  totalNonSpeechDurationClient: number | null;
+  negativeSpeechWeightedDurationClient: number | null;
+  negativeLevelClient: number | null;
+}
+
+const emptySummaryAnalyserResult: SummaryAnalyserResult = {
+  simultaneousSpeechCount: null,
+  simultaneousSilenceCount: 0,
+  maxSimultaneousSpeechDuration: null,
+  maxSimultaneousSilenceDuration: 0,
+  averageSimultaneousSpeechDuration: null,
+  averageSimultaneousSilenceDuration: 0,
+  keywordsSearchCounter: {},
+  totalSpeechOverall: 0,
+  totalNonSpeechOverall: 0,
+  negativeLevelOverall: 0,
+  totalSpeechDurationOperator: null,
+  totalNonSpeechDurationOperator: null,
+  negativeSpeechWeightedDurationOperator: null,
+  negativeLevelOperator: null,
+  totalSpeechDurationClient: null,
+  totalNonSpeechDurationClient: null,
+  negativeSpeechWeightedDurationClient: null,
+  negativeLevelClient: null,
+};
 
 type MediaFileRow = Prisma.MediaFileGetPayload<{ include: typeof mediaFileInclude }>;
 
@@ -183,7 +226,10 @@ export class MediaFilesService {
     return this.storage.getObjectStream(row.storageKey);
   }
 
-  async getResult(id: number, query: { simultaneousSilenceDurationThreshold?: number }): Promise<MediaFileResultDto> {
+  async getResult(
+    id: number,
+    query: { negativeProbThreshold?: number; simultaneousSilenceDurationThreshold?: number },
+  ): Promise<MediaFileResultDto> {
     const row = await this.prisma.mediaFileResult.findUnique({ where: { mediaFileId: id } });
     if (!row) {
       return {
@@ -207,11 +253,17 @@ export class MediaFilesService {
       };
     }
 
+    let tonal = row.tonal as { regions: { prob: number }[] } | null;
+    if (tonal && query.negativeProbThreshold !== undefined) {
+      const threshold = query.negativeProbThreshold;
+      tonal = { regions: tonal.regions.filter((region) => region.prob >= threshold) };
+    }
+
     return {
       gptSummary: row.gptSummary,
       gptChecklist: row.gptChecklist as Record<string, unknown> | null,
       stt: row.stt as Record<string, unknown> | null,
-      tonal: row.tonal as Record<string, unknown> | null,
+      tonal: tonal as unknown as Record<string, unknown> | null,
       simultaneousSpeech: row.simultaneousSpeech as Record<string, unknown> | null,
       simultaneousSilence: simultaneousSilence as unknown as Record<string, unknown> | null,
       keywordsSearchResult: row.keywordsSearchResult as Record<string, unknown> | null,
@@ -240,24 +292,13 @@ export class MediaFilesService {
         direction: row.direction,
       },
       summaryAnalyserResult: {
+        ...emptySummaryAnalyserResult,
+        ...((row.result?.summaryAnalyserResult as unknown as SummaryAnalyserResult | null) ?? {}),
+        // денормализованные колонки MediaFile — источник истины для сортировки списка
+        // (GET api/v2/mediafile orderByDescXxx), summaryAnalyserResult может им проиграть по свежести.
         simultaneousSpeechCount: row.simultaneousSpeechCount,
-        simultaneousSilenceCount: 0,
-        maxSimultaneousSpeechDuration: null,
         maxSimultaneousSilenceDuration: row.maxSimultaneousSilenceDuration ?? 0,
-        averageSimultaneousSpeechDuration: null,
-        averageSimultaneousSilenceDuration: 0,
-        keywordsSearchCounter: {},
-        totalSpeechOverall: 0,
-        totalNonSpeechOverall: 0,
         negativeLevelOverall: row.negativeLevelOverall ?? 0,
-        totalSpeechDurationOperator: null,
-        totalNonSpeechDurationOperator: null,
-        negativeSpeechWeightedDurationOperator: null,
-        negativeLevelOperator: null,
-        totalSpeechDurationClient: null,
-        totalNonSpeechDurationClient: null,
-        negativeSpeechWeightedDurationClient: null,
-        negativeLevelClient: null,
       },
       filteredKeywordsCount: row.keywordsCount ?? 0,
       gptSummary: '',

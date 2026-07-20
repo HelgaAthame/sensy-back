@@ -3,6 +3,10 @@ export interface Interval {
   end: number;
 }
 
+export function sumDuration(intervals: Interval[]): number {
+  return intervals.reduce((sum, interval) => sum + (interval.end - interval.start), 0);
+}
+
 export function mergeIntervals(intervals: Interval[]): Interval[] {
   const sorted = [...intervals].sort((a, b) => a.start - b.start);
   const merged: Interval[] = [];

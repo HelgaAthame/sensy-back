@@ -35,7 +35,7 @@ RUN npm run prisma:generate
 # Качаем веса Whisper в образ на этапе сборки — иначе рантайм тянул бы их
 # заново при каждом холодном старте контейнера на Render.
 COPY scripts ./scripts
-RUN node scripts/prefetch-whisper-model.mjs
+RUN node scripts/prefetch-models.mjs
 
 ENV NODE_ENV=production
 

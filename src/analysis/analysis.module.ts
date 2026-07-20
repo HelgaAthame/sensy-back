@@ -4,10 +4,11 @@ import { AnalysisProcessor, MEDIA_ANALYSIS_QUEUE } from './analysis.processor';
 import { AudioService } from './audio.service';
 import { KeywordSearchService } from './keyword-search.service';
 import { SttService } from './stt.service';
+import { TonalService } from './tonal.service';
 
 @Module({
   imports: [BullModule.registerQueue({ name: MEDIA_ANALYSIS_QUEUE })],
-  providers: [AnalysisProcessor, AudioService, SttService, KeywordSearchService],
+  providers: [AnalysisProcessor, AudioService, SttService, KeywordSearchService, TonalService],
   exports: [BullModule],
 })
 export class AnalysisModule {}

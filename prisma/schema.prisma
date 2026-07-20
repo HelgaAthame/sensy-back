@@ -124,6 +124,9 @@ model MediaFileResult {
   simultaneousSpeech   Json?
   simultaneousSilence  Json?
   keywordsSearchResult Json?
+  // Готовый summaryAnalyserResult для списка/аналитики — считается один раз в
+  // AnalysisProcessor, чтобы не пересчитывать агрегаты по jsonb на каждый GET.
+  summaryAnalyserResult Json?
 
   gptSummary   String?
   gptChecklist Json?
