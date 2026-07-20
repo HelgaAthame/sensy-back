@@ -224,11 +224,15 @@ chat_messages    (id, chat_type enum(Notification,Alert), chat_id, create_date, 
 
 ## 9. Этапы реализации
 
-**Фаза 0 — каркас.** Проект (NestJS/Docker/Postgres/Prisma), auth (`signin`, простой JWT), CRUD `operators`, `projects`, `dictionaries`, `checklists`, подключённый `@nestjs/swagger` (OpenAPI-спека + Swagger UI на все эндпоинты с первого дня, растёт вместе с контроллерами) — без ML. Разблокирует справочные страницы фронта.
+**Фаза 0 — каркас. ✅ Выполнено.** Проект (NestJS/Docker/Postgres/Prisma), auth (`signin`, простой JWT), CRUD `operators`, `projects`, `dictionaries`, `checklists`, подключённый `@nestjs/swagger` (OpenAPI-спека + Swagger UI на все эндпоинты с первого дня, растёт вместе с контроллерами) — без ML. Разблокирует справочные страницы фронта. Задеплоено на Render + Neon.
 
-**Фаза 1 — приём звонков.** Загрузка файла (одиночный объект в ответе, см. решённые вопросы) + хранилище (MinIO) + метаданные (ffprobe) + список `GET api/v2/mediafile` с пагинацией/фильтрами/сортировкой (без результатов анализа) + очередь на BullMQ/Redis. Разблокирует `/calls`, `/uploading-record`.
+**Фаза 1 — приём звонков. ✅ Выполнено.** Загрузка файла (одиночный объект в ответе, см. решённые вопросы) + хранилище (MinIO локально / Backblaze B2 в проде) + метаданные (ffprobe) + список `GET api/v2/mediafile` с пагинацией/фильтрами/сортировкой (без результатов анализа) + очередь на BullMQ/Redis. Разблокирует `/calls`, `/uploading-record`. Задеплоено и проверено в проде.
 
-**Фаза 2 — базовый анализ.** STT (Whisper через transformers.js) по каналам + VAD (`@ricky0123/vad-node`) → simultaneous speech/silence + keyword search по словарям. Разблокирует транскрипт и часть карточки звонка.
+**Фаза 2 — базовый анализ. ✅ Выполнено.** STT (Whisper `whisper-tiny` через `@xenova/transformers`) по каналам + keyword search по словарям. Разблокирует транскрипт и часть карточки звонка.
+- **Отклонение от исходного плана**: вместо отдельной VAD-модели (`@ricky0123/vad-node`) `simultaneousSpeech`/`simultaneousSilence` вычисляются напрямую из тайм-кодов чанков Whisper (`return_timestamps: true`) через пересечение/дополнение интервалов по каналам — тайм-коды STT и есть речевые интервалы, отдельный VAD-проход был бы избыточен. Проще, меньше зависимостей, тот же результат для целей продукта.
+- **Известный пробел**: BullMQ/Redis на Render (продакшен) пока не настроен — очередь анализа локально (docker-compose) работает полностью, но в проде постановка задачи в очередь сейчас падает по защитному try/catch (см. `media-files.service.ts`), звонок загружается и сохраняется, но анализ не запускается. Нужен бесплатный Redis в проде (кандидат — Upstash free tier) по аналогии с тем, как раньше был закрыт похожий пробел с S3-хранилищем через Backblaze B2.
+- Собрано и проверено локально через `docker compose` на тестовом WAV-файле сквозь весь цикл: загрузка → статус `Ready` → `GET api/mediafile/{id}/result` с непустыми `stt`/`simultaneousSpeech`/`simultaneousSilence`/`keywordsSearchResult`.
+- Попутный фикс инфраструктуры: рантайм Docker-образа переведён с `node:22-alpine` на `node:22-slim` — прекомпилированный `onnxruntime-node` (транзитивная зависимость `@xenova/transformers`) собран под glibc и не грузится на musl (Alpine).
 
 **Фаза 3 — тональность и аналитика.** Эмоции/негатив по аудио (ONNX SER-модель), агрегаты `summaryAnalyserResult`, `GET api/v2/dashboard`.
 
