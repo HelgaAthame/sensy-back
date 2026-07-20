@@ -6,6 +6,7 @@ import { AnalysisModule } from './analysis/analysis.module';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { ChecklistsModule } from './checklists/checklists.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { DictionariesModule } from './dictionaries/dictionaries.module';
 import { MediaFilesModule } from './media-files/media-files.module';
 import { OperatorsModule } from './operators/operators.module';
@@ -59,6 +60,7 @@ import { StorageModule } from './storage/storage.module';
     ChecklistsModule,
     AnalysisModule,
     MediaFilesModule,
+    DashboardModule,
   ],
   controllers: [AppController],
 })
