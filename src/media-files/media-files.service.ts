@@ -96,7 +96,14 @@ export class MediaFilesService {
 
     if (!isFailed) {
       try {
-        await this.analysisQueue.add('analyze', { mediaFileId: row.id });
+        // Жёсткий таймаут поверх ioredis-настроек — постановка в очередь никогда не должна
+        // блокировать ответ на загрузку звонка дольше пары секунд, что бы ни случилось с Redis.
+        await Promise.race([
+          this.analysisQueue.add('analyze', { mediaFileId: row.id }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('таймаут постановки в очередь (5с)')), 5000),
+          ),
+        ]);
       } catch (error) {
         this.logger.warn(
           `Не удалось поставить звонок id=${row.id} в очередь анализа (Redis недоступен?): ${
