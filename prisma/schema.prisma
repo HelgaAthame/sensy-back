@@ -108,7 +108,25 @@ model MediaFile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  result MediaFileResult?
+
   @@index([createDate])
   @@index([operatorId])
   @@index([projectId])
+}
+
+model MediaFileResult {
+  mediaFileId Int       @id
+  mediaFile   MediaFile @relation(fields: [mediaFileId], references: [id], onDelete: Cascade)
+
+  stt                  Json?
+  tonal                Json?
+  simultaneousSpeech   Json?
+  simultaneousSilence  Json?
+  keywordsSearchResult Json?
+
+  gptSummary   String?
+  gptChecklist Json?
+
+  updatedAt DateTime @updatedAt
 }

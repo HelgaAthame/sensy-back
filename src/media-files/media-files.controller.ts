@@ -22,6 +22,7 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreateMediaFileQueryDto } from './dto/create-media-file-query.dto';
 import { MediaFileQueryDto } from './dto/media-file-query.dto';
+import { MediaFileResultDto, MediaFileResultQueryDto } from './dto/media-file-result.dto';
 import { MediaFileDto, MediaFileListResponseDto } from './dto/media-file.dto';
 import { MediaFilesService } from './media-files.service';
 
@@ -64,5 +65,12 @@ export class MediaFilesController {
       ...(contentLength ? { 'Content-Length': contentLength } : {}),
     });
     stream.pipe(res);
+  }
+
+  @Get('api/mediafile/:id/result')
+  @ApiOperation({ summary: 'Результаты анализа звонка (расшифровка, паузы, перебивания, ключевые слова)' })
+  @ApiOkResponse({ type: MediaFileResultDto })
+  getResult(@Param('id', ParseIntPipe) id: number, @Query() query: MediaFileResultQueryDto) {
+    return this.mediaFilesService.getResult(id, query);
   }
 }

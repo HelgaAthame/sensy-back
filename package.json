@@ -30,6 +30,7 @@
     "@nestjs/platform-express": "^10.4.0",
     "@nestjs/swagger": "^7.4.0",
     "@prisma/client": "^5.19.0",
+    "@xenova/transformers": "^2.17.2",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.80.8",
     "class-transformer": "^0.5.1",
@@ -39,7 +40,8 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "wavefile": "^11.0.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",
@@ -62,6 +64,9 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.5.4"
+  },
+  "overrides": {
+    "sharp": "file:../../../stubs/sharp"
   },
   "prisma": {
     "seed": "node -r ts-node/register prisma/seed.ts"

@@ -1,3 +1,4 @@
+import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
@@ -5,11 +6,14 @@ import * as os from 'os';
 import * as path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import { Prisma } from '@prisma/client';
+import { Queue } from 'bullmq';
+import { MEDIA_ANALYSIS_QUEUE, MediaAnalysisJobData } from '../analysis/analysis.processor';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { CreateMediaFileQueryDto } from './dto/create-media-file-query.dto';
 import { MediaFileQueryDto } from './dto/media-file-query.dto';
 import { MediaFileDto, MediaFileListResponseDto } from './dto/media-file.dto';
+import { MediaFileResultDto } from './dto/media-file-result.dto';
 
 interface ProbedMetadata {
   numChannels: number | null;
@@ -31,6 +35,7 @@ export class MediaFilesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    @InjectQueue(MEDIA_ANALYSIS_QUEUE) private readonly analysisQueue: Queue<MediaAnalysisJobData>,
   ) {}
 
   private async probeMetadata(filePath: string): Promise<ProbedMetadata> {
@@ -82,12 +87,24 @@ export class MediaFilesService {
         projectId: query.projectId,
         createDate: new Date(query.createDate),
         clientNumber: query.clientNumber,
-        status: isFailed ? 'Failed' : 'Ready',
+        status: isFailed ? 'Failed' : 'Processing',
         isFailed,
         failureReason,
       },
       include: mediaFileInclude,
     });
+
+    if (!isFailed) {
+      try {
+        await this.analysisQueue.add('analyze', { mediaFileId: row.id });
+      } catch (error) {
+        this.logger.warn(
+          `Не удалось поставить звонок id=${row.id} в очередь анализа (Redis недоступен?): ${
+            error instanceof Error ? error.message : error
+          }`,
+        );
+      }
+    }
 
     return this.mapMediaFile(row);
   }
@@ -157,6 +174,41 @@ export class MediaFilesService {
       throw new NotFoundException(`Звонок с id=${id} не найден`);
     }
     return this.storage.getObjectStream(row.storageKey);
+  }
+
+  async getResult(id: number, query: { simultaneousSilenceDurationThreshold?: number }): Promise<MediaFileResultDto> {
+    const row = await this.prisma.mediaFileResult.findUnique({ where: { mediaFileId: id } });
+    if (!row) {
+      return {
+        gptSummary: null,
+        gptChecklist: null,
+        stt: null,
+        tonal: null,
+        simultaneousSpeech: null,
+        simultaneousSilence: null,
+        keywordsSearchResult: null,
+      };
+    }
+
+    let simultaneousSilence = row.simultaneousSilence as {
+      regions: { startTime: number; endTime: number }[];
+    } | null;
+    if (simultaneousSilence && query.simultaneousSilenceDurationThreshold !== undefined) {
+      const threshold = query.simultaneousSilenceDurationThreshold;
+      simultaneousSilence = {
+        regions: simultaneousSilence.regions.filter((region) => region.endTime - region.startTime >= threshold),
+      };
+    }
+
+    return {
+      gptSummary: row.gptSummary,
+      gptChecklist: row.gptChecklist as Record<string, unknown> | null,
+      stt: row.stt as Record<string, unknown> | null,
+      tonal: row.tonal as Record<string, unknown> | null,
+      simultaneousSpeech: row.simultaneousSpeech as Record<string, unknown> | null,
+      simultaneousSilence: simultaneousSilence as unknown as Record<string, unknown> | null,
+      keywordsSearchResult: row.keywordsSearchResult as Record<string, unknown> | null,
+    };
   }
 
   private mapMediaFile(row: MediaFileRow): MediaFileDto {
