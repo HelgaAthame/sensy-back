@@ -14,6 +14,13 @@ import { TonalRegion, TonalService } from './tonal.service';
 const OPERATOR_CHANNEL = 0;
 const CLIENT_CHANNEL = 1;
 
+// На Render free tier (512MB RAM) даже одна ONNX-модель за раз (после фикса с выгрузкой
+// между Whisper/SER) всё ещё иногда не вписывается в лимит вместе с базовым потреблением
+// Node/NestJS/Prisma. Временный выключатель — пока не увеличена память или не найдена
+// более лёгкая SER-модель, распознавание эмоций можно отключить переменной окружения,
+// сохранив STT/поиск по словарям рабочими. По умолчанию включено (локальная разработка).
+const TONAL_ANALYSIS_ENABLED = process.env.ENABLE_TONAL_ANALYSIS !== 'false';
+
 function average(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -121,7 +128,9 @@ export class AnalysisProcessor extends WorkerHost {
 
       const channelResults = [];
       for (const { channel, audioData, sttResult, keywordMatches } of sttPhase) {
-        const tonalRegions = await this.tonal.classifyChunks(audioData, channel, sttResult.chunks);
+        const tonalRegions = TONAL_ANALYSIS_ENABLED
+          ? await this.tonal.classifyChunks(audioData, channel, sttResult.chunks)
+          : [];
         channelResults.push({ channel, sttResult, keywordMatches, tonalRegions });
       }
 
