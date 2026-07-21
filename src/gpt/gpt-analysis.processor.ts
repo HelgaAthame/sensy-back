@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { buildWorkerConnection } from '../redis-connection';
 import { GptAnalysisService } from './gpt-analysis.service';
 
 export const GPT_ANALYSIS_QUEUE = 'gpt-analysis';
@@ -10,7 +11,10 @@ export interface GptAnalysisJobData {
 }
 
 @Injectable()
-@Processor(GPT_ANALYSIS_QUEUE)
+@Processor(GPT_ANALYSIS_QUEUE, {
+  // Отдельное, более терпеливое Redis-соединение для воркера — см. redis-connection.ts.
+  connection: buildWorkerConnection(),
+})
 export class GptAnalysisProcessor extends WorkerHost {
   private readonly logger = new Logger(GptAnalysisProcessor.name);
 

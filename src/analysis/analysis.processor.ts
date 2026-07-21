@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildWorkerConnection } from '../redis-connection';
 import { AudioService } from './audio.service';
 import { complementIntervals, intersectIntervals, mergeIntervals, sumDuration } from './intervals';
 import { KeywordMatch, KeywordSearchService } from './keyword-search.service';
@@ -44,6 +45,8 @@ export interface MediaAnalysisJobData {
   // стандартный lockDuration BullMQ (30с) не успевает продлеваться, и job считается "зависшим"
   // и перезапускается повторно, хотя первый запуск ещё не закончился. Даём щедрый запас.
   lockDuration: 20 * 60 * 1000,
+  // Отдельное, более терпеливое Redis-соединение для воркера — см. redis-connection.ts.
+  connection: buildWorkerConnection(),
 })
 export class AnalysisProcessor extends WorkerHost {
   private readonly logger = new Logger(AnalysisProcessor.name);
