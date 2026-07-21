@@ -33,9 +33,16 @@ import { StorageModule } from './storage/storage.module';
         // с очередью HTTP-запросы. Здесь: редкий бэкофф (до 30с) + свой обработчик 'error' вместо
         // дефолтного (который иначе печатает полный стек на каждую попытку), enableOfflineQueue:false,
         // чтобы команды сразу отклонялись, а не бесконечно ждали в оффлайн-очереди.
+        //
+        // Managed Redis (Upstash и т.п.) требует пароль и TLS (схема rediss://) — раньше отсюда
+        // читались только host/port, из-за чего подключение к Upstash не смогло бы даже
+        // аутентифицироваться.
         const connection = new Redis({
           host: redisUrl.hostname,
           port: Number(redisUrl.port || 6379),
+          username: redisUrl.username || undefined,
+          password: redisUrl.password || undefined,
+          tls: redisUrl.protocol === 'rediss:' ? {} : undefined,
           maxRetriesPerRequest: null,
           enableOfflineQueue: false,
           connectTimeout: 3000,
