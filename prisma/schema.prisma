@@ -56,11 +56,12 @@ model DictionaryProject {
 }
 
 model Checklist {
-  id                Int                @id @default(autoincrement())
+  id                Int                  @id @default(autoincrement())
   name              String?
-  isActive          Boolean            @default(true)
+  isActive          Boolean              @default(true)
   data              Json?
   checklistProjects ChecklistProject[]
+  mediaFileChecklists MediaFileChecklist[]
 }
 
 model ChecklistProject {
@@ -108,11 +109,30 @@ model MediaFile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  result MediaFileResult?
+  result     MediaFileResult?
+  checklists MediaFileChecklist[]
 
   @@index([createDate])
   @@index([operatorId])
   @@index([projectId])
+}
+
+// Применённый к конкретному звонку чек-лист: изначально заполняется GPT
+// (Фаза 4, POST api/mediafile/:id/gpt-analysis), затем оператор может
+// поправить оценки через PUT api/mediafile/:id?checklistId=X.
+model MediaFileChecklist {
+  mediaFileId Int
+  mediaFile   MediaFile @relation(fields: [mediaFileId], references: [id], onDelete: Cascade)
+  checklistId Int
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  // ChecklistItem: { name, minScore, maxScore, score, blocks: [{ name, minScore, maxScore, score,
+  // criterias: [{ name, minScore, maxScore, score, help, comment, scale }] }] }
+  data Json
+
+  updatedAt DateTime @updatedAt
+
+  @@id([mediaFileId, checklistId])
 }
 
 model MediaFileResult {
@@ -128,8 +148,9 @@ model MediaFileResult {
   // AnalysisProcessor, чтобы не пересчитывать агрегаты по jsonb на каждый GET.
   summaryAnalyserResult Json?
 
-  gptSummary   String?
-  gptChecklist Json?
+  gptSummary String?
+  // Оценки по чек-листам (изначально от GPT, поправляемые оператором) хранятся
+  // отдельно в MediaFileChecklist — по одной записи на пару (звонок, чек-лист).
 
   updatedAt DateTime @updatedAt
 }

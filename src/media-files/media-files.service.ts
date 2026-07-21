@@ -8,8 +8,10 @@ import ffmpeg from 'fluent-ffmpeg';
 import { Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { MEDIA_ANALYSIS_QUEUE, MediaAnalysisJobData } from '../analysis/analysis.processor';
+import { GPT_ANALYSIS_QUEUE, GptAnalysisJobData } from '../gpt/gpt-analysis.processor';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { ApplyChecklistBodyDto } from './dto/apply-media-file-checklist.dto';
 import { CreateMediaFileQueryDto } from './dto/create-media-file-query.dto';
 import { MediaFileQueryDto } from './dto/media-file-query.dto';
 import { MediaFileDto, MediaFileListResponseDto } from './dto/media-file.dto';
@@ -79,6 +81,7 @@ export class MediaFilesService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     @InjectQueue(MEDIA_ANALYSIS_QUEUE) private readonly analysisQueue: Queue<MediaAnalysisJobData>,
+    @InjectQueue(GPT_ANALYSIS_QUEUE) private readonly gptAnalysisQueue: Queue<GptAnalysisJobData>,
   ) {}
 
   private async probeMetadata(filePath: string): Promise<ProbedMetadata> {
@@ -230,11 +233,17 @@ export class MediaFilesService {
     id: number,
     query: { negativeProbThreshold?: number; simultaneousSilenceDurationThreshold?: number },
   ): Promise<MediaFileResultDto> {
-    const row = await this.prisma.mediaFileResult.findUnique({ where: { mediaFileId: id } });
+    const [row, checklistRows] = await Promise.all([
+      this.prisma.mediaFileResult.findUnique({ where: { mediaFileId: id } }),
+      this.prisma.mediaFileChecklist.findMany({ where: { mediaFileId: id } }),
+    ]);
+    const gptChecklist =
+      checklistRows.length > 0 ? { collection: checklistRows.map((checklistRow) => checklistRow.data) } : null;
+
     if (!row) {
       return {
         gptSummary: null,
-        gptChecklist: null,
+        gptChecklist,
         stt: null,
         tonal: null,
         simultaneousSpeech: null,
@@ -261,13 +270,73 @@ export class MediaFilesService {
 
     return {
       gptSummary: row.gptSummary,
-      gptChecklist: row.gptChecklist as Record<string, unknown> | null,
+      gptChecklist: gptChecklist as unknown as Record<string, unknown> | null,
       stt: row.stt as Record<string, unknown> | null,
       tonal: tonal as unknown as Record<string, unknown> | null,
       simultaneousSpeech: row.simultaneousSpeech as Record<string, unknown> | null,
       simultaneousSilence: simultaneousSilence as unknown as Record<string, unknown> | null,
       keywordsSearchResult: row.keywordsSearchResult as Record<string, unknown> | null,
     };
+  }
+
+  async triggerGptAnalysis(id: number): Promise<void> {
+    const mediaFile = await this.prisma.mediaFile.findUnique({ where: { id } });
+    if (!mediaFile) {
+      throw new NotFoundException(`Звонок с id=${id} не найден`);
+    }
+    await this.gptAnalysisQueue.add('gpt-analyze', { mediaFileId: id });
+  }
+
+  async applyChecklist(id: number, checklistId: number, body: ApplyChecklistBodyDto): Promise<void> {
+    const [mediaFile, checklist] = await Promise.all([
+      this.prisma.mediaFile.findUnique({ where: { id } }),
+      this.prisma.checklist.findUnique({ where: { id: checklistId } }),
+    ]);
+    if (!mediaFile) {
+      throw new NotFoundException(`Звонок с id=${id} не найден`);
+    }
+    if (!checklist) {
+      throw new NotFoundException(`Чек-лист с id=${checklistId} не найден`);
+    }
+
+    const blocks = (body.blocks ?? []).map((block) => {
+      const criterias = (block.criterias ?? []).map((criteria) => {
+        const minScore = criteria.minScore ?? 0;
+        const maxScore = criteria.maxScore ?? 1;
+        const score = Math.min(maxScore, Math.max(minScore, criteria.score ?? minScore));
+        return {
+          name: criteria.name,
+          minScore,
+          maxScore,
+          score,
+          help: criteria.help ?? null,
+          comment: criteria.comment ?? null,
+          scale: criteria.scale ?? 'Full',
+        };
+      });
+      return {
+        name: block.name,
+        minScore: criterias.reduce((sum, c) => sum + c.minScore, 0),
+        maxScore: criterias.reduce((sum, c) => sum + c.maxScore, 0),
+        score: criterias.reduce((sum, c) => sum + c.score, 0),
+        criterias,
+      };
+    });
+
+    const data = {
+      id: checklistId,
+      name: checklist.name,
+      minScore: blocks.reduce((sum, b) => sum + b.minScore, 0),
+      maxScore: blocks.reduce((sum, b) => sum + b.maxScore, 0),
+      score: blocks.reduce((sum, b) => sum + b.score, 0),
+      blocks,
+    };
+
+    await this.prisma.mediaFileChecklist.upsert({
+      where: { mediaFileId_checklistId: { mediaFileId: id, checklistId } },
+      create: { mediaFileId: id, checklistId, data: data as unknown as Prisma.InputJsonValue },
+      update: { data: data as unknown as Prisma.InputJsonValue },
+    });
   }
 
   private mapMediaFile(row: MediaFileRow): MediaFileDto {

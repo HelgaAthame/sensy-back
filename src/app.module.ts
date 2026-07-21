@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { ChecklistsModule } from './checklists/checklists.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DictionariesModule } from './dictionaries/dictionaries.module';
+import { GptModule } from './gpt/gpt.module';
 import { MediaFilesModule } from './media-files/media-files.module';
 import { OperatorsModule } from './operators/operators.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -59,6 +60,7 @@ import { StorageModule } from './storage/storage.module';
     DictionariesModule,
     ChecklistsModule,
     AnalysisModule,
+    GptModule,
     MediaFilesModule,
     DashboardModule,
   ],

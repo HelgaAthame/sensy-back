@@ -1,9 +1,12 @@
 import {
+  Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Post,
+  Put,
   Query,
   Res,
   UploadedFile,
@@ -20,6 +23,10 @@ import {
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import {
+  ApplyChecklistBodyDto,
+  ApplyChecklistQueryDto,
+} from './dto/apply-media-file-checklist.dto';
 import { CreateMediaFileQueryDto } from './dto/create-media-file-query.dto';
 import { MediaFileQueryDto } from './dto/media-file-query.dto';
 import { MediaFileResultDto, MediaFileResultQueryDto } from './dto/media-file-result.dto';
@@ -72,5 +79,22 @@ export class MediaFilesController {
   @ApiOkResponse({ type: MediaFileResultDto })
   getResult(@Param('id', ParseIntPipe) id: number, @Query() query: MediaFileResultQueryDto) {
     return this.mediaFilesService.getResult(id, query);
+  }
+
+  @Post('api/mediafile/:id/gpt-analysis')
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Запустить фоновую генерацию GPT-саммари и авто-заполнение чек-листов (Groq)' })
+  triggerGptAnalysis(@Param('id', ParseIntPipe) id: number) {
+    return this.mediaFilesService.triggerGptAnalysis(id);
+  }
+
+  @Put('api/mediafile/:id')
+  @ApiOperation({ summary: 'Сохранить оценки чек-листа по звонку (изначально от GPT, правится оператором)' })
+  applyChecklist(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ApplyChecklistQueryDto,
+    @Body() body: ApplyChecklistBodyDto,
+  ) {
+    return this.mediaFilesService.applyChecklist(id, query.checklistId, body);
   }
 }
