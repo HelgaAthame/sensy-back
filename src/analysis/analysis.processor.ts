@@ -93,22 +93,24 @@ export class AnalysisProcessor extends WorkerHost {
           phrases: (dictionary.phrases as string[] | null) ?? [],
         }));
 
-      const channelResults = await Promise.all(
-        Array.from({ length: channelCount }, (_, channel) => channel).map(async (channel) => {
-          const channelPath = await this.audio.splitChannel(sourcePath, channel);
-          tempFiles.push(channelPath);
-          const audioData = this.audio.readWavAsFloat32(channelPath);
-          const sttResult = await this.stt.transcribeChannel(audioData, channel);
-          const keywordMatches = this.keywordSearch.search(
-            channel,
-            sttResult.text,
-            sttResult.chunks,
-            activeDictionaries,
-          );
-          const tonalRegions = await this.tonal.classifyChunks(audioData, channel, sttResult.chunks);
-          return { channel, sttResult, keywordMatches, tonalRegions };
-        }),
-      );
+      // Каналы обрабатываются последовательно, а не через Promise.all — на Render free tier
+      // (512MB RAM) параллельная загрузка Whisper + SER-модели сразу для двух каналов
+      // приводила к OOM и перезапуску контейнера прямо посреди анализа.
+      const channelResults = [];
+      for (const channel of Array.from({ length: channelCount }, (_, index) => index)) {
+        const channelPath = await this.audio.splitChannel(sourcePath, channel);
+        tempFiles.push(channelPath);
+        const audioData = this.audio.readWavAsFloat32(channelPath);
+        const sttResult = await this.stt.transcribeChannel(audioData, channel);
+        const keywordMatches = this.keywordSearch.search(
+          channel,
+          sttResult.text,
+          sttResult.chunks,
+          activeDictionaries,
+        );
+        const tonalRegions = await this.tonal.classifyChunks(audioData, channel, sttResult.chunks);
+        channelResults.push({ channel, sttResult, keywordMatches, tonalRegions });
+      }
 
       const speechIntervalsByChannel = channelResults.map((result) =>
         mergeIntervals(result.sttResult.chunks.map((chunk) => ({ start: chunk.startTime, end: chunk.endTime }))),
