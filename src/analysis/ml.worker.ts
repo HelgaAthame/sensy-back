@@ -4,7 +4,7 @@
 // и платформа считает контейнер зависшим и убивает его посреди анализа. Здесь та же
 // тяжёлая работа выполняется в отдельном потоке со своим собственным event loop, поэтому
 // главный поток остаётся отзывчивым, сколько бы времени ни занял инференс.
-import { parentPort } from 'worker_threads';
+import { parentPort } from 'node:worker_threads';
 import { env, pipeline } from '@xenova/transformers';
 import { TRANSFORMERS_CACHE_DIR } from './transformers-cache-dir';
 
@@ -47,27 +47,46 @@ interface TonalRegion {
   channel: number;
 }
 
-type WhisperPipeline = (audio: Float32Array, options: Record<string, unknown>) => Promise<WhisperOutput | WhisperOutput[]>;
-type EmotionClassifier = (audio: Float32Array, options?: Record<string, unknown>) => Promise<EmotionScore[] | EmotionScore[][]>;
-
-let whisperPromise: Promise<WhisperPipeline> | null = null;
-function getWhisperPipeline(): Promise<WhisperPipeline> {
-  if (!whisperPromise) {
-    whisperPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-      quantized: true,
-    }) as unknown as Promise<WhisperPipeline>;
-  }
-  return whisperPromise;
+interface DisposablePipeline {
+  dispose(): Promise<void>;
 }
 
-let tonalPromise: Promise<EmotionClassifier> | null = null;
-function getTonalPipeline(): Promise<EmotionClassifier> {
-  if (!tonalPromise) {
-    tonalPromise = pipeline('audio-classification', SER_MODEL_ID, {
-      quantized: true,
-    }) as unknown as Promise<EmotionClassifier>;
+type WhisperPipeline = ((audio: Float32Array, options: Record<string, unknown>) => Promise<WhisperOutput | WhisperOutput[]>) &
+  DisposablePipeline;
+type EmotionClassifier = ((audio: Float32Array, options?: Record<string, unknown>) => Promise<EmotionScore[] | EmotionScore[][]>) &
+  DisposablePipeline;
+
+// На Render free tier (512MB RAM) обе модели, загруженные одновременно и держащиеся в памяти
+// до конца жизни процесса, вместе с ONNX-инференс-буферами превышали лимит и контейнер убивало
+// по OOM. Держим загруженной только ОДНУ модель за раз — при переключении на другой тип задачи
+// явно освобождаем предыдущую (pipeline.dispose()) перед загрузкой новой. Дороже по времени
+// (модель перегружается при каждом переключении туда-обратно), но вписывается в память.
+let loadedModel: { type: 'whisper'; pipeline: WhisperPipeline } | { type: 'tonal'; pipeline: EmotionClassifier } | null = null;
+
+async function getWhisperPipeline(): Promise<WhisperPipeline> {
+  if (loadedModel?.type === 'whisper') return loadedModel.pipeline;
+  if (loadedModel) {
+    await loadedModel.pipeline.dispose();
+    loadedModel = null;
   }
-  return tonalPromise;
+  const whisperPipeline = (await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+    quantized: true,
+  })) as unknown as WhisperPipeline;
+  loadedModel = { type: 'whisper', pipeline: whisperPipeline };
+  return whisperPipeline;
+}
+
+async function getTonalPipeline(): Promise<EmotionClassifier> {
+  if (loadedModel?.type === 'tonal') return loadedModel.pipeline;
+  if (loadedModel) {
+    await loadedModel.pipeline.dispose();
+    loadedModel = null;
+  }
+  const tonalPipeline = (await pipeline('audio-classification', SER_MODEL_ID, {
+    quantized: true,
+  })) as unknown as EmotionClassifier;
+  loadedModel = { type: 'tonal', pipeline: tonalPipeline };
+  return tonalPipeline;
 }
 
 async function transcribeChannel(audioData: Float32Array, channel: number) {

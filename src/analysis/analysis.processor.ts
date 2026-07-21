@@ -98,9 +98,14 @@ export class AnalysisProcessor extends WorkerHost {
 
       // Каналы обрабатываются последовательно, а не через Promise.all — на Render free tier
       // (512MB RAM) параллельная загрузка Whisper + SER-модели сразу для двух каналов
-      // приводила к OOM и перезапуску контейнера прямо посреди анализа.
-      const channelResults = [];
-      for (const channel of Array.from({ length: channelCount }, (_, index) => index)) {
+      // приводила к OOM. По той же причине сгруппировано по фазам (сначала STT для ВСЕХ
+      // каналов, потом тональность для ВСЕХ каналов), а не чередованием по каналу — ML-worker
+      // держит в памяти только одну модель за раз и выгружает предыдущую при переключении
+      // типа задачи (см. ml.worker.ts), так дешевле: 2 переключения модели вместо 4.
+      const channels = Array.from({ length: channelCount }, (_, index) => index);
+
+      const sttPhase = [];
+      for (const channel of channels) {
         const channelPath = await this.audio.splitChannel(sourcePath, channel);
         tempFiles.push(channelPath);
         const audioData = this.audio.readWavAsFloat32(channelPath);
@@ -111,6 +116,11 @@ export class AnalysisProcessor extends WorkerHost {
           sttResult.chunks,
           activeDictionaries,
         );
+        sttPhase.push({ channel, audioData, sttResult, keywordMatches });
+      }
+
+      const channelResults = [];
+      for (const { channel, audioData, sttResult, keywordMatches } of sttPhase) {
         const tonalRegions = await this.tonal.classifyChunks(audioData, channel, sttResult.chunks);
         channelResults.push({ channel, sttResult, keywordMatches, tonalRegions });
       }

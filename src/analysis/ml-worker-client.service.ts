@@ -1,6 +1,6 @@
-import { randomUUID } from 'crypto';
-import * as path from 'path';
-import { Worker } from 'worker_threads';
+import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { SttChannelResult } from './stt.service';
 import { TonalRegion } from './tonal.service';
