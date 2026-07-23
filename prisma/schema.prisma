@@ -154,3 +154,23 @@ model MediaFileResult {
 
   updatedAt DateTime @updatedAt
 }
+
+enum ChatType {
+  Notification
+  Alert
+}
+
+// Лента уведомлений/алертов в шапке фронтенда (см. BACKEND_PLAN.md, раздел
+// "Chat / Notifications"). Пока только чтение — системные триггеры и ручной
+// POST-эндпоинт из плана ещё не реализованы, таблица наполнится позже.
+model ChatMessage {
+  id               Int      @id @default(autoincrement())
+  chatType         ChatType
+  chatId           Int      @default(0)
+  createDate       DateTime @default(now())
+  text             String?
+  attachmentsCount Int      @default(0)
+  seen             Boolean  @default(false)
+
+  @@index([chatType, createDate])
+}
