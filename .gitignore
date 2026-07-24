@@ -23,3 +23,9 @@ yarn-error.log*
 
 # local storage emulation (MinIO dev volume, if bind-mounted)
 /.data
+
+# Claude Code / agent harness local state
+/.claude
+
+# Playwright MCP session artifacts (screenshots, snapshots, console logs)
+/.playwright-mcp

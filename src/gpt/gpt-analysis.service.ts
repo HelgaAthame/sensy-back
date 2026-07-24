@@ -1,5 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ChatTypeDto } from '../chat/dto/chat-message.dto';
+import { ChatService } from '../chat/chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatMessage, GroqClient } from './groq.client';
 
@@ -69,6 +71,7 @@ export class GptAnalysisService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly groq: GroqClient,
+    private readonly chat: ChatService,
   ) {}
 
   async runAnalysis(mediaFileId: number): Promise<void> {
@@ -82,39 +85,55 @@ export class GptAnalysisService {
     if (!mediaFile) {
       throw new NotFoundException(`Звонок с id=${mediaFileId} не найден`);
     }
+    const fileLabel = mediaFile.fileName ?? mediaFileId;
 
-    const stt = mediaFile.result?.stt as { chunks?: SttChunkLike[] } | null;
-    const transcript = formatTranscript(stt?.chunks ?? []);
-    if (!transcript) {
-      this.logger.warn(`Звонок id=${mediaFileId}: пустая расшифровка, GPT-анализ пропущен`);
-      return;
-    }
+    try {
+      const stt = mediaFile.result?.stt as { chunks?: SttChunkLike[] } | null;
+      const transcript = formatTranscript(stt?.chunks ?? []);
+      if (!transcript) {
+        this.logger.warn(`Звонок id=${mediaFileId}: пустая расшифровка, GPT-анализ пропущен`);
+        return;
+      }
 
-    const summaryPromise = this.generateSummary(transcript);
+      const summaryPromise = this.generateSummary(transcript);
 
-    const checklists = mediaFile.project?.checklistProjects.map((link) => link.checklist) ?? [];
-    const checklistPromises = checklists
-      .filter((checklist) => checklist.isActive && checklist.data)
-      .map((checklist) => this.scoreChecklist(checklist.id, checklist.data as unknown as ChecklistTemplateData, transcript));
+      const checklists = mediaFile.project?.checklistProjects.map((link) => link.checklist) ?? [];
+      const checklistPromises = checklists
+        .filter((checklist) => checklist.isActive && checklist.data)
+        .map((checklist) => this.scoreChecklist(checklist.id, checklist.data as unknown as ChecklistTemplateData, transcript));
 
-    const [summary, ...scoredChecklists] = await Promise.all([summaryPromise, ...checklistPromises]);
+      const [summary, ...scoredChecklists] = await Promise.all([summaryPromise, ...checklistPromises]);
 
-    await this.prisma.mediaFileResult.upsert({
-      where: { mediaFileId },
-      create: { mediaFileId, gptSummary: summary },
-      update: { gptSummary: summary },
-    });
-
-    for (const item of scoredChecklists) {
-      if (!item) continue;
-      await this.prisma.mediaFileChecklist.upsert({
-        where: { mediaFileId_checklistId: { mediaFileId, checklistId: item.id } },
-        create: { mediaFileId, checklistId: item.id, data: item as unknown as Prisma.InputJsonValue },
-        update: { data: item as unknown as Prisma.InputJsonValue },
+      await this.prisma.mediaFileResult.upsert({
+        where: { mediaFileId },
+        create: { mediaFileId, gptSummary: summary },
+        update: { gptSummary: summary },
       });
-    }
 
-    this.logger.log(`GPT-анализ звонка id=${mediaFileId} завершён (чек-листов: ${scoredChecklists.filter(Boolean).length})`);
+      for (const item of scoredChecklists) {
+        if (!item) continue;
+        await this.prisma.mediaFileChecklist.upsert({
+          where: { mediaFileId_checklistId: { mediaFileId, checklistId: item.id } },
+          create: { mediaFileId, checklistId: item.id, data: item as unknown as Prisma.InputJsonValue },
+          update: { data: item as unknown as Prisma.InputJsonValue },
+        });
+      }
+
+      this.logger.log(`GPT-анализ звонка id=${mediaFileId} завершён (чек-листов: ${scoredChecklists.filter(Boolean).length})`);
+      await this.notifySafely(ChatTypeDto.Notification, `GPT-саммари и чек-лист для записи «${fileLabel}» готовы`);
+    } catch (error) {
+      this.logger.error(`GPT-анализ звонка id=${mediaFileId} упал: ${error instanceof Error ? error.message : error}`);
+      await this.notifySafely(ChatTypeDto.Alert, `Не удалось сформировать GPT-анализ для записи «${fileLabel}»`);
+    }
+  }
+
+  /** Системное уведомление не должно ронять GPT-анализ, если вдруг само не смогло записаться. */
+  private async notifySafely(chatType: ChatTypeDto, text: string): Promise<void> {
+    try {
+      await this.chat.create(chatType, text);
+    } catch (error) {
+      this.logger.warn(`Не удалось создать уведомление: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
   private async generateSummary(transcript: string): Promise<string> {

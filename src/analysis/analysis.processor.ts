@@ -2,6 +2,8 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Job } from 'bullmq';
+import { ChatTypeDto } from '../chat/dto/chat-message.dto';
+import { ChatService } from '../chat/chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildWorkerConnection } from '../redis-connection';
 import { AudioService } from './audio.service';
@@ -20,6 +22,10 @@ const CLIENT_CHANNEL = 1;
 // более лёгкая SER-модель, распознавание эмоций можно отключить переменной окружения,
 // сохранив STT/поиск по словарям рабочими. По умолчанию включено (локальная разработка).
 const TONAL_ANALYSIS_ENABLED = process.env.ENABLE_TONAL_ANALYSIS !== 'false';
+
+/** Порог "высокого" негатива для алерта в ленте — выше обычного дефолтного фильтра дашборда (0.3),
+ * т.к. это проактивное уведомление, а не пассивный фильтр (см. BACKEND_PLAN.md, раздел 3). */
+const NEGATIVE_LEVEL_ALERT_THRESHOLD = 0.5;
 
 function average(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -64,6 +70,7 @@ export class AnalysisProcessor extends WorkerHost {
     private readonly stt: SttService,
     private readonly keywordSearch: KeywordSearchService,
     private readonly tonal: TonalService,
+    private readonly chat: ChatService,
   ) {
     super();
   }
@@ -75,6 +82,7 @@ export class AnalysisProcessor extends WorkerHost {
     const mediaFile = await this.prisma.mediaFile.findUnique({
       where: { id: mediaFileId },
       include: {
+        operator: true,
         project: { include: { dictionaryProjects: { include: { dictionary: true } } } },
       },
     });
@@ -246,6 +254,17 @@ export class AnalysisProcessor extends WorkerHost {
       });
 
       this.logger.log(`Анализ звонка id=${mediaFileId} завершён`);
+
+      await this.notifySafely(
+        ChatTypeDto.Notification,
+        `Запись «${mediaFile.fileName ?? mediaFileId}» обработана и готова к просмотру`,
+      );
+      if ((negativeLevelOverall ?? 0) >= NEGATIVE_LEVEL_ALERT_THRESHOLD) {
+        await this.notifySafely(
+          ChatTypeDto.Alert,
+          `Высокий уровень негатива в звонке оператора ${mediaFile.operator?.name ?? 'Н/Д'} от ${mediaFile.createDate.toLocaleDateString('ru-RU')}`,
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Неизвестная ошибка анализа';
       this.logger.error(`Анализ звонка id=${mediaFileId} упал: ${message}`);
@@ -253,8 +272,21 @@ export class AnalysisProcessor extends WorkerHost {
         where: { id: mediaFileId },
         data: { status: 'Failed', isFailed: true, failureReason: message },
       });
+      await this.notifySafely(
+        ChatTypeDto.Alert,
+        `Обработка записи «${mediaFile.fileName ?? mediaFileId}» завершилась с ошибкой`,
+      );
     } finally {
       await this.audio.cleanup(tempFiles);
+    }
+  }
+
+  /** Системное уведомление не должно ронять анализ звонка, если вдруг само не смогло записаться. */
+  private async notifySafely(chatType: ChatTypeDto, text: string): Promise<void> {
+    try {
+      await this.chat.create(chatType, text);
+    } catch (error) {
+      this.logger.warn(`Не удалось создать уведомление: ${error instanceof Error ? error.message : error}`);
     }
   }
 }

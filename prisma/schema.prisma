@@ -154,3 +154,25 @@ model MediaFileResult {
 
   updatedAt DateTime @updatedAt
 }
+
+enum ChatType {
+  Notification
+  Alert
+}
+
+// Лента уведомлений в шапке: Notification — рутинные события (звонок обработан),
+// Alert — то, что требует внимания (ошибка, высокий негатив). Источник — и системные
+// триггеры внутри пайплайна (см. AnalysisProcessor/GptAnalysisService), и ручной
+// POST api/chat/:chatType/message. chatId — порядковый номер сообщения внутри своей
+// ленты (Notification/Alert считаются раздельно), отдельно от глобального id.
+model ChatMessage {
+  id               Int      @id @default(autoincrement())
+  chatType         ChatType
+  chatId           Int
+  createDate       DateTime @default(now())
+  text             String?
+  attachmentsCount Int      @default(0)
+  seen             Boolean  @default(false)
+
+  @@index([chatType, createDate])
+}

@@ -10,6 +10,12 @@ import { TRANSFORMERS_CACHE_DIR } from './transformers-cache-dir';
 
 env.cacheDir = TRANSFORMERS_CACHE_DIR;
 
+// Пробовали форсировать WASM-бэкенд execution provider вместо нативного onnxruntime-node
+// (в попытке снизить память на Render free tier) — не сработало, transformers.js@2.17 не
+// поддерживает Whisper (encoder-decoder) через чистый WASM: "Unsupported model type: whisper".
+// Остаёмся на нативном 'cpu' provider (см. ENABLE_TONAL_ANALYSIS в analysis.processor.ts —
+// текущее решение проблемы с памятью на Render).
+
 const WHISPER_SAMPLE_RATE = 16000;
 const SER_MODEL_ID = 'onnx-community/wav2vec2-base-Speech_Emotion_Recognition-ONNX';
 const NEGATIVE_LABELS = new Set(['SAD', 'ANGRY', 'DISGUST', 'FEAR']);

@@ -5,6 +5,7 @@ import Redis from 'ioredis';
 import { AnalysisModule } from './analysis/analysis.module';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
+import { ChatModule } from './chat/chat.module';
 import { ChecklistsModule } from './checklists/checklists.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DictionariesModule } from './dictionaries/dictionaries.module';
@@ -54,6 +55,7 @@ import { StorageModule } from './storage/storage.module';
     GptModule,
     MediaFilesModule,
     DashboardModule,
+    ChatModule,
   ],
   controllers: [AppController],
 })
