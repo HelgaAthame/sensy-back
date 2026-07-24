@@ -1,17 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ChatType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ChatMessageDto, ChatTypeDto } from './dto/chat-message.dto';
+import { ChatMessageDto, ChatMessageQueryDto } from './dto/chat-message.dto';
 
 @Injectable()
 export class ChatService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(
-    chatType: ChatTypeDto,
-    query: { start?: string; end?: string; offset?: number; limit?: number },
-  ): Promise<ChatMessageDto[]> {
-    const where: Prisma.ChatMessageWhereInput = { chatType: chatType as ChatType };
+  async findAll(chatType: ChatType, query: ChatMessageQueryDto): Promise<ChatMessageDto[]> {
+    const where: Prisma.ChatMessageWhereInput = { chatType };
     if (query.start || query.end) {
       where.createDate = {
         ...(query.start ? { gte: new Date(query.start) } : {}),
@@ -30,10 +27,10 @@ export class ChatService {
   }
 
   /** Системные триггеры (см. AnalysisProcessor/GptAnalysisService) и ручное создание используют один и тот же путь. */
-  async create(chatType: ChatTypeDto, text: string): Promise<ChatMessageDto> {
-    const chatId = (await this.prisma.chatMessage.count({ where: { chatType: chatType as ChatType } })) + 1;
+  async create(chatType: ChatType, text: string): Promise<ChatMessageDto> {
+    const chatId = (await this.prisma.chatMessage.count({ where: { chatType } })) + 1;
     const row = await this.prisma.chatMessage.create({
-      data: { chatType: chatType as ChatType, chatId, text },
+      data: { chatType, chatId, text },
     });
     return this.mapMessage(row);
   }

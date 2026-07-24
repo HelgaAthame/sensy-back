@@ -168,7 +168,7 @@ enum ChatType {
 model ChatMessage {
   id               Int      @id @default(autoincrement())
   chatType         ChatType
-  chatId           Int
+  chatId           Int      @default(0)
   createDate       DateTime @default(now())
   text             String?
   attachmentsCount Int      @default(0)

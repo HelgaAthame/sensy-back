@@ -1,8 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ChatType, Prisma } from '@prisma/client';
 import { Job } from 'bullmq';
-import { ChatTypeDto } from '../chat/dto/chat-message.dto';
 import { ChatService } from '../chat/chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildWorkerConnection } from '../redis-connection';
@@ -256,12 +255,12 @@ export class AnalysisProcessor extends WorkerHost {
       this.logger.log(`Анализ звонка id=${mediaFileId} завершён`);
 
       await this.notifySafely(
-        ChatTypeDto.Notification,
+        ChatType.Notification,
         `Запись «${mediaFile.fileName ?? mediaFileId}» обработана и готова к просмотру`,
       );
       if ((negativeLevelOverall ?? 0) >= NEGATIVE_LEVEL_ALERT_THRESHOLD) {
         await this.notifySafely(
-          ChatTypeDto.Alert,
+          ChatType.Alert,
           `Высокий уровень негатива в звонке оператора ${mediaFile.operator?.name ?? 'Н/Д'} от ${mediaFile.createDate.toLocaleDateString('ru-RU')}`,
         );
       }
@@ -273,7 +272,7 @@ export class AnalysisProcessor extends WorkerHost {
         data: { status: 'Failed', isFailed: true, failureReason: message },
       });
       await this.notifySafely(
-        ChatTypeDto.Alert,
+        ChatType.Alert,
         `Обработка записи «${mediaFile.fileName ?? mediaFileId}» завершилась с ошибкой`,
       );
     } finally {
@@ -282,7 +281,7 @@ export class AnalysisProcessor extends WorkerHost {
   }
 
   /** Системное уведомление не должно ронять анализ звонка, если вдруг само не смогло записаться. */
-  private async notifySafely(chatType: ChatTypeDto, text: string): Promise<void> {
+  private async notifySafely(chatType: ChatType, text: string): Promise<void> {
     try {
       await this.chat.create(chatType, text);
     } catch (error) {

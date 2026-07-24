@@ -1,6 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { ChatTypeDto } from '../chat/dto/chat-message.dto';
+import { ChatType, Prisma } from '@prisma/client';
 import { ChatService } from '../chat/chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatMessage, GroqClient } from './groq.client';
@@ -120,15 +119,15 @@ export class GptAnalysisService {
       }
 
       this.logger.log(`GPT-анализ звонка id=${mediaFileId} завершён (чек-листов: ${scoredChecklists.filter(Boolean).length})`);
-      await this.notifySafely(ChatTypeDto.Notification, `GPT-саммари и чек-лист для записи «${fileLabel}» готовы`);
+      await this.notifySafely(ChatType.Notification, `GPT-саммари и чек-лист для записи «${fileLabel}» готовы`);
     } catch (error) {
       this.logger.error(`GPT-анализ звонка id=${mediaFileId} упал: ${error instanceof Error ? error.message : error}`);
-      await this.notifySafely(ChatTypeDto.Alert, `Не удалось сформировать GPT-анализ для записи «${fileLabel}»`);
+      await this.notifySafely(ChatType.Alert, `Не удалось сформировать GPT-анализ для записи «${fileLabel}»`);
     }
   }
 
   /** Системное уведомление не должно ронять GPT-анализ, если вдруг само не смогло записаться. */
-  private async notifySafely(chatType: ChatTypeDto, text: string): Promise<void> {
+  private async notifySafely(chatType: ChatType, text: string): Promise<void> {
     try {
       await this.chat.create(chatType, text);
     } catch (error) {

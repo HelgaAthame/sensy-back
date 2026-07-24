@@ -47,6 +47,7 @@ import { StorageModule } from './storage/storage.module';
     PrismaModule,
     StorageModule,
     AuthModule,
+    ChatModule,
     OperatorsModule,
     ProjectsModule,
     DictionariesModule,
@@ -55,7 +56,6 @@ import { StorageModule } from './storage/storage.module';
     GptModule,
     MediaFilesModule,
     DashboardModule,
-    ChatModule,
   ],
   controllers: [AppController],
 })

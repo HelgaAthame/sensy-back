@@ -1,17 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsISO8601, IsInt, IsOptional, IsString } from 'class-validator';
-
-export enum ChatTypeDto {
-  Notification = 'Notification',
-  Alert = 'Alert',
-}
-
-export class ChatTypeParamDto {
-  @ApiProperty({ enum: ChatTypeDto })
-  @IsEnum(ChatTypeDto)
-  chatType!: ChatTypeDto;
-}
+import { IsISO8601, IsInt, IsOptional, IsString } from 'class-validator';
 
 export class ChatMessageQueryDto {
   @ApiPropertyOptional()
@@ -53,7 +42,7 @@ export class ChatMessageDto {
   @ApiProperty()
   createDate!: string;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiProperty({ nullable: true })
   text!: string | null;
 
   @ApiProperty()
